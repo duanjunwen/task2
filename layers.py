@@ -1,9 +1,10 @@
 from typing import Callable, Optional
-
+import os
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
 from torch.nn.parameter import Parameter
+
 
 from initialize import get_model_parallel_rank, get_model_parallel_world_size
 from mappings import (
@@ -39,7 +40,7 @@ def _initialize_affine_weight(
         return None
 
     # Initialize master weight
-    master_weight = torch.empty(out_features, in_features, dtype=weight.dtype, requires_grad=False)
+    master_weight = torch.empty(out_features, in_features, dtype=weight.dtype, requires_grad=False).cuda()
     init_method(master_weight)
 
     # Split and copy
@@ -227,17 +228,18 @@ class ColumnParallelLinear(torch.nn.Module):
         self.out_features = out_features
         self.gather_output = gather_output
         # Divide the weight matrix along the last dimension.
-        world_size = get_model_parallel_world_size()
-        self.output_size_per_partition = divide_and_check_no_remainder(out_features, world_size)
+        self.world_size = get_model_parallel_world_size()
+        self.output_size_per_partition = divide_and_check_no_remainder(out_features, self.world_size)
+        self.device = int(os.environ['LOCAL_RANK'])
         # 64 / 8 = 8
         # each card hold 512 * 8
 
         # Parameters.
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
         # we allocate the transpose.
-        self.weight = Parameter(torch.Tensor(self.output_size_per_partition, self.in_features))
+        self.weight = Parameter(torch.Tensor(self.output_size_per_partition, self.in_features)).cuda(device=self.device)
         if bias:
-            self.bias = Parameter(torch.Tensor(self.output_size_per_partition))
+            self.bias = Parameter(torch.Tensor(self.output_size_per_partition)).cuda(device=self.device)
             # Always initialize bias to zero.
             with torch.no_grad():
                 self.bias.zero_()
@@ -263,6 +265,8 @@ class ColumnParallelLinear(torch.nn.Module):
         # Set up backprop all-reduce.
         input_parallel = copy_to_model_parallel_region(input_)
         # Matrix multiply.
+        # print(f"input_parallel {input_parallel.get_device()}, weight {self.weight.get_device()}")
+        
         output_parallel = F.linear(input_parallel, self.weight, self.bias)
         if self.gather_output:
             # All-gather across the partitions.
@@ -317,15 +321,17 @@ class RowParallelLinear(torch.nn.Module):
         self.out_features = out_features
         self.input_is_parallel = input_is_parallel
         # Divide the weight matrix along the last dimension.
-        world_size = get_model_parallel_world_size()
-        self.input_size_per_partition = divide_and_check_no_remainder(in_features, world_size)
+        self.world_size = get_model_parallel_world_size()
+        self.input_size_per_partition = divide_and_check_no_remainder(in_features, self.world_size)
+        self.device = int(os.environ['LOCAL_RANK'])
 
         # Parameters.
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
         # we allocate the transpose.
-        self.weight = Parameter(torch.Tensor(self.out_features, self.input_size_per_partition))
+        self.weight = Parameter(torch.Tensor(self.out_features, self.input_size_per_partition)).cuda(device=self.device)
+        # self.weight = Parameter(torch.Tensor(self.input_size_per_partition, self.out_features))
         if bias:
-            self.bias = Parameter(torch.Tensor(self.out_features))
+            self.bias = Parameter(torch.Tensor(self.out_features)).cuda(device=self.device)
             # Always initialize bias to zero.
             with torch.no_grad():
                 self.bias.zero_()
@@ -353,12 +359,22 @@ class RowParallelLinear(torch.nn.Module):
             input_parallel = input_
         else:
             input_parallel = scatter_to_model_parallel_region(input_)
-        # Matrix multiply.
+        
+        # self.weight should be [hidden dim// head, hidden dim]
+        # but here [hidden dim, hidden dim// head]
+        # weight = torch.transpose(self.weight, 0, 1).contiguous().view(self.input_size_per_partition, self.out_features)
+        
+        # # Matrix multiply.
         output_parallel = F.linear(input_parallel, self.weight)
-        # All-reduce across all the partitions.
+        # print(f"type(output_parallel) {type(output_parallel)}")
+        # output_parallel = F.linear(input_parallel, weight.transpose(0, 1))
+        # print(f"input shape {input_parallel.shape}, wo__ shape {weight.shape}, output_parallel {output_parallel.shape},input_size_per_partition {self.input_size_per_partition}\n")
+        
+        # # All-reduce across all the partitions.
         output_ = reduce_from_model_parallel_region(output_parallel)
         if self.bias is not None:
             output = output_ + self.bias
         else:
             output = output_
+        # return output
         return output

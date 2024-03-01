@@ -1,10 +1,12 @@
 
-单机8卡 
+单机8卡
+MultiHead Attention  
 batch_size, head, seq_length, dim = 64, 8, 128, 4096
-Atten (No TP) 6.703676700592041; Atten (with CP) 1.211535930633545; Atten (with RP) 1.0967254638671875e-05
-Atten (No TP) 8.272181987762451; Atten (with CP) 1.2277874946594238; Atten (with RP) 8.821487426757812e-06
-Atten (No TP) 6.6789093017578125; Atten (with CP) 1.1926000118255615; Atten (with RP) 1.0967254638671875e-05
-Atten (No TP) 7.0154712200164795; Atten (with CP) 1.0776584148406982; Atten (with RP) 7.62939453125e-06
-Atten (No TP) 6.713608264923096; Atten (with CP) 1.1225643157958984; Atten (with RP) 9.059906005859375e-06
-Atten (No TP) 7.174290180206299; Atten (with CP) 1.0875751972198486; Atten (with RP) 1.2874603271484375e-05
-Atten (No TP) 6.680564641952515; Atten (with CP) 1.1251904964447021; Atten (with RP) 8.821487426757812e-06
+ Atten (No TP) 9.390451192855835; Atten (with CP) 5.80548357963562; Atten (with RP) None
+ Atten (No TP) 8.795151948928833; Atten (with CP) 7.636837959289551; Atten (with RP) None
+ Atten (No TP) 8.77989649772644; Atten (with CP) 6.017398357391357; Atten (with RP) None
+ Atten (No TP) 8.808838367462158; Atten (with CP) 5.932817459106445; Atten (with RP) None
+ Atten (No TP) 9.243069887161255; Atten (with CP) 5.674362659454346; Atten (with RP) None
+ Atten (No TP) 8.784903049468994; Atten (with CP) 5.993225574493408; Atten (with RP) None
+ Atten (No TP) 9.88126277923584; Atten (with CP) 13.122991800308228; Atten (with RP) None
+ Atten (No TP) 8.944480657577515; Atten (with CP) 13.12143063545227; Atten (with RP) None

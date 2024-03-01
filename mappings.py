@@ -1,11 +1,11 @@
 from typing import Any
 
 import torch
-
+import torch.distributed as dist
 from initialize import get_model_parallel_group
 from utils import split_tensor_along_last_dim
 
-
+# torch.Tensor should be a cuda tensor
 def _reduce(ctx: Any, input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the the input tensor across model parallel group."""
     group = get_model_parallel_group()
@@ -17,8 +17,11 @@ def _reduce(ctx: Any, input_: torch.Tensor) -> torch.Tensor:
     if torch.distributed.get_world_size(group=group) == 1:
         return input_
 
-    # All-reduce.
-    torch.distributed.all_reduce(input_, group=group)
+    # print(f"group {group}")
+    # # # All-reduce.
+    # output_ = input_.contiguous()
+    dist.all_reduce(input_, group=group)
+    # torch.distributed.all_reduce(input_, op=torch.distributed.ReduceOp.SUM)
 
     return input_
 
