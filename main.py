@@ -3,9 +3,11 @@ import torch
 import sys
 import os
 import time
+import argparse
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 from torch import nn
+import torch.optim as optim
 import torch.distributed as dist
 import initialize as fs_init
 from layers import (
@@ -24,24 +26,14 @@ def init_dist():
 
     dist.init_process_group(world_size=world_size, rank=rank,
                             init_method="env://", backend="nccl")
-    fs_init.initialize_model_parallel(world_size)
+    # model_parallel_size_= world_size，GPU全部用于tensor parallism
+    fs_init.initialize_model_parallel(model_parallel_size_= world_size)
     torch.cuda.set_device(local_rank)
 
 # time cycle
 def get_time():
     torch.cuda.synchronize()
     return time.time()
-
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
-    bs, slen, n_kv_heads, head_dim = x.shape
-    if n_rep == 1:
-        return x
-    return (
-        x[:, :, :, None, :]
-        .expand(bs, slen, n_kv_heads, n_rep, head_dim)
-        .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
-    )
 
 
 # self-Attention
@@ -199,7 +191,16 @@ class Attention_TP(nn.Module):
 
 
 def main():
-    # print(f"CUDA device {int(os.environ['LOCAL_RANK'])}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-g", "--grad_checkpoint", action="store_true", help="Use gradient checkpointing")
+    parser.add_argument("-x", "--mixed_precision", default="fp16", choices=["fp16", "bf16"], help="Mixed precision")
+    parser.add_argument("-tp", "--tensor_parallelism", default=True, choices=[True, False], help="Tensor parallelism")
+    parser.add_argument("-dp", "--data_parallelism", default=True, choices=[True, False], help="Data parallelism")
+    args = parser.parse_args()
+    
+    # ==============================
+    # 1. Tensor Parallism
+    # ==============================
     device = int(os.environ['LOCAL_RANK'])
     batch_size, head, seq_length, dim = 64, 8, 128, 4096
     # atten no TP
@@ -211,29 +212,81 @@ def main():
     score = attn.forward(x)
     AttenStop = get_time()
     
-    # atten with CP (columnParallism)
+    # atten with TP (tensor_parallelism)
     init_dist()
     x_tp = x.cuda(device=device)
-    attn_cp = Attention_TP(batch_size, head, seq_length, dim)
-    # if attn_cp.supports_gradient_checkpointing:
-    #     attn_cp.gradient_checkpointing_enable()
-    #     print(f"Gradient Checkpointing: {attn_cp.is_gradient_checkpointing}")
+    if args.tensor_parallelism == True:
+        attn_tp = Attention_TP(batch_size, head, seq_length, dim).to(device)
+    else:
+        attn_tp = Attention(batch_size, head, seq_length, dim).to(device)
     dk = dim // head # 512 / 8 = 64
-    # q, xk, v = torch.randn(batch_size, head, seq_length, dk), torch.randn(batch_size, head, seq_length, dk), torch.randn(batch_size, head, seq_length, dk)
     AttenCPStart = get_time()
-    score = attn_cp.forward(x_tp)
+    score = attn_tp.forward(x_tp)
     AttenCPStop = get_time()
-    
-    # # atten with RP(rowParallism)
-    # # pass
-    # attn_rp = ScaleDotProductAttention_RP(batch_size, head, seq_length, dim)
-    # AttenRPStart = get_time()
-    # score, v = attn_rp.forward(x)
-    # AttenRPStop = get_time()
-    
-    print(f" Atten (No TP) {AttenStop - AttenStart}; Atten (with CP) {AttenCPStop - AttenCPStart}; Atten (with RP) {None}")
+    print(f" Atten (No TP) {AttenStop - AttenStart}; Atten (with TP) {AttenCPStop - AttenCPStart}; \n")
     
 
+    # ==============================
+    # 2. Gradient Checkpoints
+    # ==============================
+    # save model
+    model_name = 'Multi-Head_Atten'
+    checkpoint_path = f'./checkpoints/{model_name}.pt'
+    torch.save({
+        'model_state_dict': attn_tp.state_dict()
+    }, checkpoint_path)
+    # load model & cont train
+    attn_checkpoint = Attention_TP(batch_size, head, seq_length, dim).to(device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    attn_checkpoint.load_state_dict(checkpoint['model_state_dict'])
+    AttenCPStart = get_time()
+    # attn_checkpoint.train()
+    attn_checkpoint.forward(x_tp)
+    AttenCPStop = get_time()
+    print(f" Atten (load checkpoint) {AttenCPStop - AttenCPStart}; \n")
+
+    # ==============================
+    # 3. Mix percision
+    # ==============================
+    default_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
+    torch.set_default_dtype(default_dtype)
+    x_mp = x.type(default_dtype).cuda(device=device)
+    attn_mp = Attention_TP(batch_size, head, seq_length, dim).to(device)
+    AttenMPStart = get_time()
+    score = attn_mp.forward(x_mp)
+    AttenMPStop = get_time()
+    print(f" Atten (Mix percision) {AttenMPStop - AttenMPStart}; \n")   
+    
+    # ==============================
+    # 4. Data Parallism
+    # ==============================
+    # 有4个GPU [0, 1, 2, 3],想实现DP + TP
+    # Data Para: x = x1 + x2;  [0， 1] hold same x1, [2, 3] hold same x2
+    # Tensor para： x1 [0, 1] , x2 [2, 3]
+    # gradient accum; dx = （dx1 [0,1] + dx2 [2, 3]）// 2 
+    
+    torch.set_default_dtype(torch.float32)
+    if args.data_parallelism == True:
+        tensorList = torch.chunk(x, 2)
+        x1, x2 = tensorList[0], tensorList[1]
+        # print(f"len_tensorList:{len(tensorList)}, x1 shape{x1.shape}")
+        attn_tp = Attention_TP(x1.shape[0], head, seq_length, dim).to(device)
+        AttenDPStart = get_time()
+        if device == 0 or device == 1:
+            curr_x = x1.cuda(device=device)
+            attn_tp.forward(curr_x)
+        if device == 2 or device == 3:
+            curr_x = x2.cuda(device=device)
+            attn_tp.forward(curr_x)
+        AttenDPEnd = get_time()
+        print(f" Atten (Data parallelism) {AttenDPEnd - AttenDPStart}; \n")   
+    else:
+        print(f" No Data parallelism; \n")
+
+    
+    
+       
+    
 
 if __name__ == "__main__":
     main()

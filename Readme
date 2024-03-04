@@ -2,11 +2,35 @@
 单机8卡
 MultiHead Attention  
 batch_size, head, seq_length, dim = 64, 8, 128, 4096
- Atten (No TP) 9.390451192855835; Atten (with CP) 5.80548357963562; Atten (with RP) None
- Atten (No TP) 8.795151948928833; Atten (with CP) 7.636837959289551; Atten (with RP) None
- Atten (No TP) 8.77989649772644; Atten (with CP) 6.017398357391357; Atten (with RP) None
- Atten (No TP) 8.808838367462158; Atten (with CP) 5.932817459106445; Atten (with RP) None
- Atten (No TP) 9.243069887161255; Atten (with CP) 5.674362659454346; Atten (with RP) None
- Atten (No TP) 8.784903049468994; Atten (with CP) 5.993225574493408; Atten (with RP) None
- Atten (No TP) 9.88126277923584; Atten (with CP) 13.122991800308228; Atten (with RP) None
- Atten (No TP) 8.944480657577515; Atten (with CP) 13.12143063545227; Atten (with RP) None
+ Atten (No TP) 11.06398868560791; Atten (with TP) 3.2577245235443115; 
+
+ Atten (No TP) 11.527137756347656; Atten (with TP) 2.727466106414795; 
+
+ Atten (No TP) 11.232461214065552; Atten (with TP) 3.0435214042663574; 
+
+ Atten (No TP) 11.82038140296936; Atten (with TP) 2.6357405185699463; 
+
+ Atten (load checkpoint) 0.01711273193359375; 
+
+ Atten (load checkpoint) 0.01429295539855957; 
+
+ Atten (load checkpoint) 0.014110803604125977; 
+
+ Atten (load checkpoint) 0.007226705551147461; 
+
+ Atten (Mix percision) 0.35045576095581055; 
+
+ Atten (Mix percision) 0.5172052383422852; 
+
+ Atten (Mix percision) 0.7580904960632324; 
+
+
+ Atten (Mix percision) 0.5356500148773193; 
+
+ Atten (Data parallelism) 0.19030284881591797;
+ 
+ Atten (Data parallelism) 0.19769954681396484; 
+
+ Atten (Data parallelism) 0.1979372501373291; 
+
+ Atten (Data parallelism) 0.19976353645324707; 
