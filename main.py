@@ -99,7 +99,7 @@ class Attention_TP(nn.Module):
     """
 
     def __init__(self, batch_size, head, seq_length, hidden_dim):
-        super().__init__()
+        super(Attention_TP,  self).__init__()
         self.batch_size = batch_size
         self.head = head
         self.seq_length = seq_length
@@ -202,6 +202,8 @@ def main():
     # 1. Tensor Parallism
     # ==============================
     device = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+    
     batch_size, head, seq_length, dim = 64, 8, 128, 4096
     # atten no TP
     attn = Attention(batch_size, head, seq_length, dim)
@@ -224,7 +226,6 @@ def main():
     score = attn_tp.forward(x_tp)
     AttenCPStop = get_time()
     print(f" Atten (No TP) {AttenStop - AttenStart}; Atten (with TP) {AttenCPStop - AttenCPStart}; \n")
-    
 
     # ==============================
     # 2. Gradient Checkpoints
@@ -264,6 +265,7 @@ def main():
     # Data Para: x = x1 + x2;  [0， 1] hold same x1, [2, 3] hold same x2
     # Tensor para： x1 [0, 1] , x2 [2, 3]
     # gradient accum; dx = （dx1 [0,1] + dx2 [2, 3]）// 2 
+    # 两路DP
     
     torch.set_default_dtype(torch.float32)
     if args.data_parallelism == True:
@@ -272,17 +274,82 @@ def main():
         # print(f"len_tensorList:{len(tensorList)}, x1 shape{x1.shape}")
         attn_tp = Attention_TP(x1.shape[0], head, seq_length, dim).to(device)
         AttenDPStart = get_time()
-        if device == 0 or device == 1:
+        if device < world_size // 2:
             curr_x = x1.cuda(device=device)
-            attn_tp.forward(curr_x)
-        if device == 2 or device == 3:
+            score = attn_tp.forward(curr_x)
+        if device >= world_size // 2:
             curr_x = x2.cuda(device=device)
-            attn_tp.forward(curr_x)
+            score = attn_tp.forward(curr_x)
         AttenDPEnd = get_time()
-        print(f" Atten (Data parallelism) {AttenDPEnd - AttenDPStart}; \n")   
+        print(f" Atten (Data parallelism on {device}) {AttenDPEnd - AttenDPStart}; \n")   
     else:
         print(f" No Data parallelism; \n")
+     
+    # ==============================
+    # 5. Test (test all func)
+    # ==============================
+    if args.data_parallelism == True and args.tensor_parallelism == True:
+        # data init
+        x = torch.randn(batch_size, head, seq_length, dim)  # 64, 8, 128, 4096
+        y = torch.randn(batch_size, seq_length, dim)  # 64, 128, 4096
+        x_tensorList = torch.chunk(x, 2)
+        y_tensorList = torch.chunk(y, 2)
+        x1, x2 = x_tensorList[0], x_tensorList[1] # 32, 8, 128, 4096
+        y1, y2 = y_tensorList[0], y_tensorList[1] # 32, 128, 4096
+        
+        # TP class
+        attn_tp = Attention_TP(x1.shape[0], head, seq_length, dim).to(device)
+        loss_func = nn.CrossEntropyLoss().to(device)
+        optimizer = optim.SGD([{"params":attn_tp.wq.parameters()}, {"params":attn_tp.wk.parameters()}, {"params":attn_tp.wv.parameters()}, {"params":attn_tp.wo.parameters()}], 
+                              lr=0.01, momentum=0.9)
+        
+        # DP on 2 group
+        if device < world_size // 2:
+            curr_x = x1.cuda(device=device)
+            curr_y = y1.cuda(device=device)
+            score1 = attn_tp.forward(curr_x)
+            loss = loss_func(score1, curr_y)
+        else:
+            # device >= world_size // 2:
+            curr_x = x2.cuda(device=device)
+            curr_y = y2.cuda(device=device)
+            score2 = attn_tp.forward(curr_x)
+            loss = loss_func(score2, curr_y)
+            
+        loss.retain_grad()
+        loss.backward()
+        print(f"Device {device}\n Gradient {loss.grad}\n")
+        optimizer.step()
+        optimizer.zero_grad()
+        
+        # Gradient Checkpoints
+        if args.grad_checkpoint:
+            # save model
+            model_name = f'Multi-Head_Atten{device}'
+            checkpoint_path = f'./checkpoints/{model_name}.pt'
+            torch.save({
+                'model_state_dict': attn_tp.state_dict()
+            }, checkpoint_path)
+            print(f"Save checkpoints{device} to {checkpoint_path}\n")
+            # load model & cont train
+            attn_checkpoint = Attention_TP(x1.shape[0], head, seq_length, dim).to(device)
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            print(f"Load checkpoints{device} from {checkpoint_path}\n")
+            attn_checkpoint.load_state_dict(checkpoint['model_state_dict'])
+            # attn_checkpoint.train()
+            if device < world_size // 2:
+                curr_x = x1.cuda(device=device)
+                attn_checkpoint.forward(curr_x)
+            else:
+                curr_x = x2.cuda(device=device)
+                attn_checkpoint.forward(curr_x)
 
+        
+
+        
+    
+
+    
     
     
        
