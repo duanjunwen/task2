@@ -1,6 +1,14 @@
 
 单机8卡
-MultiHead Attention  
+
+以MultiHead_Attention为例的
+1. Tensor parallism
+  1). Row Parallel (已完成)
+  2). Col Parallel(已完成)
+2. Data parallism(已完成)
+3. Checkpoint(已完成)
+4. Mix percision(已完成)
+
 batch_size, head, seq_length, dim = 64, 8, 128, 4096
  Atten (No TP) 11.06398868560791; Atten (with TP) 3.2577245235443115; 
 
