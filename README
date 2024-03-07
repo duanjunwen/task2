@@ -1,0 +1,67 @@
+
+单机8卡
+
+以MultiHead_Attention为例的
+1. Tensor parallism
+  1). Row Parallel (已完成)
+  2). Col Parallel(已完成)
+2. Data parallism(已完成)
+3. Checkpoint(已完成)
+4. Mix percision(已完成)
+
+batch_size, head, seq_length, dim = 64, 8, 128, 4096
+Atten (Base) on device 2 0.5250411033630371; 
+
+Atten (with TP) 3.01582932472229; 
+
+Atten (Base) on device 3 0.461275577545166; 
+
+Atten (with TP) 3.2150425910949707; 
+
+Atten (load checkpoint) 0.018930912017822266; 
+
+Atten (load checkpoint) 0.012417793273925781; 
+
+Atten (Pure fp16) 0.36563754081726074; 
+
+Atten (Pure fp16) 0.3535175323486328; 
+
+Atten (Data parallelism on 2) 0.013139009475708008; 
+
+Atten (Data parallelism on 3) 0.006278514862060547; 
+
+Atten (with TP and Checkpoint) 0.37421226501464844; 
+
+Atten (with TP and Checkpoint) 0.3676135540008545; 
+
+Atten (Base) on device 1 0.3874225616455078; 
+
+Atten (with TP) 4.63745641708374; 
+
+Atten (Base) on device 0 0.6707577705383301; 
+
+Atten (with TP) 3.66782283782959; 
+
+Atten (load checkpoint) 0.03986406326293945; 
+
+Atten (load checkpoint) 0.035056114196777344; 
+
+Atten (Pure fp16) 0.40313029289245605; 
+
+Atten (Pure fp16) 0.4063425064086914; 
+
+Atten (Data parallelism on 1) 0.02324366569519043; 
+
+Atten (Data parallelism on 0) 0.027899742126464844; 
+
+Atten (with TP and Checkpoint) 0.38674378395080566; 
+
+Atten (with TP and Checkpoint) 0.3851919174194336; 
+
+Atten (AutoMP) 0.0678403377532959; 
+Atten (AutoMP) 0.007854223251342773; 
+
+
+Atten (AutoMP) 0.07715177536010742; 
+
+Atten (AutoMP) 0.03259921073913574; 
